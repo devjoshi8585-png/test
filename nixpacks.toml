@@ -1,9 +1,6 @@
+# nixpacks.toml
 [phases.setup]
-nixPkgs = ["python3", "python3Packages.pip"]
+nixPkgs = ["python3", "ffmpeg"]
 
 [start]
-command = "python bot.py"[phases.setup]
-nixPkgs = ["python3"]
-
-[start]
-command = "python bot.py"
+command = "python3 bot.py"
