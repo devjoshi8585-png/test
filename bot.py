@@ -166,29 +166,6 @@ async def autosave_task():
     except Exception as e:
         logger.warning(f"Autosave failed: {e}")
 
-# ====== API Provider Mapping ======
-PROVIDER_TERMS = {
-    "waifu_pics": ["waifu", "neko", "blowjob"],
-    "waifu_im": ["ero", "hentai", "ass", "hmidriff", "oppai", "hthigh", "paizuri", "ecchi", "selfies"],
-    "hmtai": ["hentai", "anal", "ass", "bdsm", "cum", "boobs", "thighs", "pussy", "ahegao", "tentacles"],
-    "nekobot": ["hentai", "hentai_anal", "hass", "hboobs", "hthigh", "paizuri", "tentacle", "pgif"],
-    "nekos_moe": ["hentai", "ecchi", "ero", "oppai", "yuri"],
-    "danbooru": ["hentai", "ecchi", "breasts", "thighs", "panties", "ass", "anal", "oral", "cum"],
-    "gelbooru": ["hentai", "ecchi", "panties", "thighs", "ass", "bikini", "cleavage"],
-    "rule34": ["hentai", "ecchi", "panties", "thighs", "ass", "big_breasts"],
-}
-
-def map_tag_for_provider(provider: str, tag: str) -> str:
-    t = (tag or "").lower().strip()
-    pool = PROVIDER_TERMS.get(provider, [])
-    if t:
-        for p in pool:
-            if p in t:
-                return p
-    if pool:
-        return random.choice(pool)
-    return t or "hentai"
-
 # ====== Download Helper ======
 async def _download_bytes_with_limit(session, url, size_limit=HEAD_SIZE_LIMIT, timeout=REQUEST_TIMEOUT):
     try:
@@ -218,8 +195,8 @@ async def _download_bytes_with_limit(session, url, size_limit=HEAD_SIZE_LIMIT, t
 # ====== API Fetch Functions ======
 async def fetch_from_waifu_pics(session, positive):
     try:
-        category = map_tag_for_provider("waifu_pics", positive)
-        url = f"https://api.waifu.pics/nsfw/{quote_plus(category)}"
+        category = random.choice(["waifu", "neko", "trap", "blowjob"])
+        url = f"https://api.waifu.pics/nsfw/{category}"
         async with session.get(url, timeout=REQUEST_TIMEOUT) as resp:
             if resp.status != 200:
                 return None, None, None
@@ -234,7 +211,7 @@ async def fetch_from_waifu_pics(session, positive):
 
 async def fetch_from_waifu_im(session, positive):
     try:
-        q = map_tag_for_provider("waifu_im", positive)
+        q = positive or random.choice(GIF_TAGS)
         base = "https://api.waifu.im/search"
         params = {"included_tags": q, "is_nsfw": "true", "limit": 8}
         headers = {}
@@ -258,7 +235,7 @@ async def fetch_from_waifu_im(session, positive):
 
 async def fetch_from_hmtai(session, positive):
     try:
-        category = map_tag_for_provider("hmtai", positive)
+        category = random.choice(["hentai","anal","ass","bdsm","cum","boobs","thighs","pussy","ahegao","tentacles"])
         url = f"https://hmtai.hatsunia.cfd/v2/nsfw/{category}"
         async with session.get(url, timeout=REQUEST_TIMEOUT) as resp:
             if resp.status != 200:
@@ -274,8 +251,8 @@ async def fetch_from_hmtai(session, positive):
 
 async def fetch_from_nekobot(session, positive):
     try:
-        category = map_tag_for_provider("nekobot", positive)
-        url = f"https://nekobot.xyz/api/image?type={quote_plus(category)}"
+        category = random.choice(["hentai","hentai_anal","hass","hboobs","hthigh","paizuri","tentacle","pgif"])
+        url = f"https://nekobot.xyz/api/image?type={category}"
         async with session.get(url, timeout=REQUEST_TIMEOUT) as resp:
             if resp.status != 200:
                 return None, None, None
@@ -312,7 +289,7 @@ async def fetch_from_nekos_moe(session, positive):
 
 async def fetch_from_danbooru(session, positive):
     try:
-        tags = f"{positive} rating:explicit"
+        tags = "rating:explicit"
         base = "https://danbooru.donmai.us/posts.json"
         params = {"tags": tags, "limit": 20, "random": "true"}
         headers = {}
@@ -331,13 +308,13 @@ async def fetch_from_danbooru(session, positive):
             if not gif_url:
                 return None, None, None
             extract_and_add_tags_from_meta(str(post.get("tag_string", "")), GIF_TAGS, data)
-            return gif_url, f"danbooru_{positive}", post
+            return gif_url, f"danbooru", post
     except Exception:
         return None, None, None
 
 async def fetch_from_gelbooru(session, positive):
     try:
-        tags = f"{positive} rating:explicit 1girl".strip()
+        tags = "rating:explicit"
         base = "https://gelbooru.com/index.php"
         params = {
             "page": "dapi",
@@ -362,13 +339,13 @@ async def fetch_from_gelbooru(session, positive):
             if not gif_url:
                 return None, None, None
             extract_and_add_tags_from_meta(post.get("tags", ""), GIF_TAGS, data)
-            return gif_url, f"gelbooru_{positive}", post
+            return gif_url, f"gelbooru", post
     except Exception:
         return None, None, None
 
 async def fetch_from_rule34(session, positive):
     try:
-        tags = f"{positive} rating:explicit 1girl".strip()
+        tags = "rating:explicit"
         base = "https://api.rule34.xxx/index.php"
         params = {
             "page": "dapi",
@@ -389,7 +366,7 @@ async def fetch_from_rule34(session, positive):
             if not gif_url:
                 return None, None, None
             extract_and_add_tags_from_meta(post.get("tags", ""), GIF_TAGS, data)
-            return gif_url, f"rule34_{positive}", post
+            return gif_url, f"rule34", post
     except Exception:
         return None, None, None
 
@@ -636,7 +613,7 @@ LEAVE_GREETINGS = [
     "🌑 {display_name} disappeared. The room feels exposed.",
     "😈 {display_name} left. Trouble paused, not finished.",
     "🕯️ {display_name} slipped out — the glow fades slowly.",
-    "👁️ {display_name} gone. Eyes still searching shadows.",
+    "👁️ {display_name} gone. Eyes still search their shadow.",
     "🌫️ {display_name} vanished like smoke — hard to forget.",
     "🖤 {display_name} walked away. Control returned. Barely.",
     "🐍 {display_name} exited — shed skin left behind.",
@@ -1003,5 +980,3 @@ if not TOKEN:
 else:
     keep_alive()
     bot.run(TOKEN)
-
-
