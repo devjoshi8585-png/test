@@ -1,6 +1,21 @@
 from flask import Flask
 from threading import Thread
 import os
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+import os
 import io
 import json
 import random
@@ -20,21 +35,6 @@ try:
     from PIL import Image, ImageSequence
 except Exception:
     Image = None
-
-# ====== keep-alive ======
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is alive!"
-
-def run():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
 
 # ====== Config / ENV KEYS ======
 TOKEN = os.getenv("TOKEN", "")
@@ -693,86 +693,11 @@ LEAVE_GREETINGS = [
     "⚡ {display_name} exited — sparks died but marks remained.",
     "🕯️ {display_name} disappeared into the dark; the night waits."
 ]
+
 while len(LEAVE_GREETINGS) < 120:
     LEAVE_GREETINGS.append(random.choice(LEAVE_GREETINGS))
 
-# ====== send_styled_dm (user-provided) ======
-async def send_styled_dm(member: discord.Member, event: str = "join"):
-    JOIN_TITLES = [
-        "🔥 Fiery Arrival",
-        "😈 Naughty Surprise",
-        "💋 Private Drop",
-        "🌶️ Too Hot to Handle",
-        "👀 Peek-a-boo..."
-    ]
-    LEAVE_TITLES = [
-        "💨 Gone so soon?",
-        "🖤 Left the party",
-        "🔚 Session ended",
-        "👋 Until next time"
-    ]
-    JOIN_GREETINGS_LOCAL = [
-        "You like it spicy? This one's for you, {mention}.",
-        "Welcome {mention} — private delight delivered.",
-        "{mention}, enjoy your VIP drop."
-    ]
-    LEAVE_GREETINGS_LOCAL = [
-        "Miss you already, {mention} 💋",
-        "Don't be away long, {mention}.",
-        "Until next time, {mention} 😉"
-    ]
-    FOOTERS = [
-        "Delivered with heat 🔥",
-        "Private • Viewer discretion advised",
-        "Spicy Bot at your service 😈"
-    ]
-    AUTHOR_NAMES = ["Midnight Muse", "Spicy Bot 🔥", "Velvet Whisper"]
-    IMAGE_PLACEHOLDERS = [
-        "https://images.unsplash.com/photo-1503341455253-b2e723bb3dbb?auto=format&fit=crop&w=1200&q=80",
-        "https://images.unsplash.com/photo-1517263904808-5dc2f6f9d6f2?auto=format&fit=crop&w=1200&q=80",
-    ]
-
-    if event not in ("join", "leave"):
-        event = "join"
-
-    title = random.choice(JOIN_TITLES) if event == "join" else random.choice(LEAVE_TITLES)
-    greeting_template = random.choice(JOIN_GREETINGS_LOCAL) if event == "join" else random.choice(LEAVE_GREETINGS_LOCAL)
-    greeting = greeting_template.format(mention=member.mention)
-    footer = random.choice(FOOTERS)
-    author = random.choice(AUTHOR_NAMES)
-    color_choices = [
-        discord.Color.red(), discord.Color.dark_red(), discord.Color.orange(),
-        discord.Color.gold(), discord.Color.purple(), discord.Color.teal()
-    ]
-    color = random.choice(color_choices)
-
-    embed = discord.Embed(title=title, description=greeting, color=color, timestamp=discord.utils.utcnow())
-    author_icon = getattr(member.display_avatar, "url", None)
-    embed.set_author(name=author, icon_url=author_icon)
-    embed.set_footer(text=footer)
-
-    try:
-        embed.add_field(name="Status", value=("VIP Access" if event == "join" else "Session Ended"), inline=False)
-        embed.add_field(name="Mood", value=random.choice(["🔥 Hot", "😈 Cheeky", "💋 Tender"]), inline=True)
-        embed.add_field(name="Access", value=random.choice(["Private", "Members-only", "Unlocked"]), inline=True)
-    except Exception:
-        pass
-
-    image_url = random.choice(IMAGE_PLACEHOLDERS) if IMAGE_PLACEHOLDERS else None
-    if image_url:
-        embed.set_image(url=image_url)
-
-    try:
-        await asyncio.sleep(0.9)
-        await member.send(embed=embed)
-    except discord.Forbidden:
-        return False
-    except Exception:
-        return False
-
-    return True
-
-# ====== Send Greeting with Embed (downloads/sends attachment when needed) ======
+# ====== Send Greeting with Embed ======
 async def send_greeting_with_image_embed(channel, session, greeting_text, image_url, member, send_to_dm=None):
     try:
         image_bytes, content_type = await _download_bytes_with_limit(session, image_url)
@@ -976,10 +901,6 @@ async def on_voice_state_update(member, before, after):
                             await send_greeting_with_image_embed(channel, session, greeting, gif_url, member, send_to_dm=member)
                         else:
                             await channel.send(greeting)
-                    try:
-                        asyncio.create_task(send_styled_dm(member, event="join"))
-                    except Exception:
-                        await send_styled_dm(member, event="join")
                 except Exception as e:
                     logger.error(f"Failed to send join greeting: {e}")
 
@@ -995,10 +916,6 @@ async def on_voice_state_update(member, before, after):
                             await send_greeting_with_image_embed(channel, session, leave_msg, gif_url, member, send_to_dm=member)
                         else:
                             await channel.send(leave_msg)
-                    try:
-                        asyncio.create_task(send_styled_dm(member, event="leave"))
-                    except Exception:
-                        await send_styled_dm(member, event="leave")
                 except Exception as e:
                     logger.error(f"Failed to send leave greeting: {e}")
 
