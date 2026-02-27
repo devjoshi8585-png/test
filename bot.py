@@ -1,20 +1,4 @@
-from flask import Flask
-from threading import Thread
-import os
-
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is alive!"
-
-def run():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
+# NSFW bot.py
 import os
 import io
 import json
@@ -56,31 +40,16 @@ AUTOSAVE_INTERVAL = int(os.getenv("AUTOSAVE_INTERVAL", "30"))
 FETCH_ATTEMPTS = int(os.getenv("FETCH_ATTEMPTS", "40"))
 MAX_USED_GIFS_PER_USER = int(os.getenv("MAX_USED_GIFS_PER_USER", "1000"))
 
-# YOUR VOICE CHANNEL IDS (Bot will monitor these)
 VC_IDS = [
     1353875050809524267,
     1379350260010455051,
     1353882705246556220,
-    1409170559337762980,
-    1353875404217253909
+    1409170559337762980
 ]
 VC_CHANNEL_ID = int(os.getenv("VC_CHANNEL_ID", "1371916812903780573"))
 
 logging.basicConfig(level=logging.DEBUG if DEBUG_FETCH else logging.INFO)
 logger = logging.getLogger("spiciest-nsfw")
-
-# ====== Helper Functions (NO RESTRICTIONS) ======
-_token_split_re = re.compile(r"[^a-z0-9]+", re.I)
-BLOCKED_TAGS = []
-
-def _tag_is_disallowed(tag: str) -> bool:
-    return False
-
-def filename_has_block_keyword(url: str) -> bool:
-    return False
-
-def contains_illegal_indicators(text: str) -> bool:
-    return False
 
 def _normalize_text(s: str) -> str:
     return "" if not s else re.sub(r'[\s\-_]+', ' ', s.lower())
@@ -125,7 +94,7 @@ def extract_and_add_tags_from_meta(meta_text: str, GIF_TAGS, data_save):
             continue
         add_tag_to_gif_tags(tok, GIF_TAGS, data_save)
 
-# ====== Data Persistence ======
+# ====== Persistent data (load/create) ======
 if not os.path.exists(DATA_FILE):
     with open(DATA_FILE, "w") as f:
         json.dump({"provider_weights": {}, "sent_history": {}, "gif_tags": [], "vc_state": {}}, f, indent=2)
@@ -166,7 +135,7 @@ async def autosave_task():
     except Exception as e:
         logger.warning(f"Autosave failed: {e}")
 
-# ====== API Provider Mapping ======
+# ====== Provider mapping and tag mapping (NSFW) ======
 PROVIDER_TERMS = {
     "waifu_pics": ["waifu", "neko", "blowjob"],
     "waifu_im": ["ero", "hentai", "ass", "hmidriff", "oppai", "hthigh", "paizuri", "ecchi", "selfies"],
@@ -189,7 +158,7 @@ def map_tag_for_provider(provider: str, tag: str) -> str:
         return random.choice(pool)
     return t or "hentai"
 
-# ====== Download Helper ======
+# ====== Network helper to download with size limit ======
 async def _download_bytes_with_limit(session, url, size_limit=HEAD_SIZE_LIMIT, timeout=REQUEST_TIMEOUT):
     try:
         async with session.get(url, timeout=timeout, allow_redirects=True) as resp:
@@ -215,17 +184,21 @@ async def _download_bytes_with_limit(session, url, size_limit=HEAD_SIZE_LIMIT, t
             logger.debug(f"GET exception for {url}: {e}")
         return None, None
 
-# ====== API Fetch Functions ======
+# ====== Provider fetch implementations (NSFW providers) ======
 async def fetch_from_waifu_pics(session, positive):
     try:
         category = map_tag_for_provider("waifu_pics", positive)
         url = f"https://api.waifu.pics/nsfw/{quote_plus(category)}"
         async with session.get(url, timeout=REQUEST_TIMEOUT) as resp:
             if resp.status != 200:
+                if DEBUG_FETCH:
+                    logger.debug(f"waifu_pics nsfw {category} -> {resp.status}")
                 return None, None, None
             payload = await resp.json()
             gif_url = payload.get("url") or payload.get("image")
-            if not gif_url:
+            if not gif_url or filename_has_block_keyword(gif_url):
+                return None, None, None
+            if contains_illegal_indicators(json.dumps(payload) + " " + (category or "")):
                 return None, None, None
             extract_and_add_tags_from_meta(json.dumps(payload), GIF_TAGS, data)
             return gif_url, f"waifu_pics_{category}", payload
@@ -249,7 +222,9 @@ async def fetch_from_waifu_im(session, positive):
                 return None, None, None
             img = random.choice(images)
             gif_url = img.get("url")
-            if not gif_url:
+            if not gif_url or filename_has_block_keyword(gif_url):
+                return None, None, None
+            if contains_illegal_indicators(json.dumps(img) + " " + (q or "")):
                 return None, None, None
             extract_and_add_tags_from_meta(str(img.get("tags", "")), GIF_TAGS, data)
             return gif_url, f"waifu_im_{q}", img
@@ -265,7 +240,9 @@ async def fetch_from_hmtai(session, positive):
                 return None, None, None
             payload = await resp.json()
             gif_url = payload.get("url")
-            if not gif_url:
+            if not gif_url or filename_has_block_keyword(gif_url):
+                return None, None, None
+            if contains_illegal_indicators(json.dumps(payload) + " " + (category or "")):
                 return None, None, None
             extract_and_add_tags_from_meta(json.dumps(payload), GIF_TAGS, data)
             return gif_url, f"hmtai_{category}", payload
@@ -283,7 +260,9 @@ async def fetch_from_nekobot(session, positive):
             if not payload.get("success"):
                 return None, None, None
             gif_url = payload.get("message")
-            if not gif_url:
+            if not gif_url or filename_has_block_keyword(gif_url):
+                return None, None, None
+            if contains_illegal_indicators(json.dumps(payload) + " " + (category or "")):
                 return None, None, None
             extract_and_add_tags_from_meta(category, GIF_TAGS, data)
             return gif_url, f"nekobot_{category}", payload
@@ -305,6 +284,8 @@ async def fetch_from_nekos_moe(session, positive):
             if not img_id:
                 return None, None, None
             gif_url = f"https://nekos.moe/image/{img_id}.jpg"
+            if contains_illegal_indicators(json.dumps(img)):
+                return None, None, None
             extract_and_add_tags_from_meta(" ".join(img.get("tags", [])), GIF_TAGS, data)
             return gif_url, "nekos_moe", img
     except Exception:
@@ -328,7 +309,9 @@ async def fetch_from_danbooru(session, positive):
                 return None, None, None
             post = random.choice(posts)
             gif_url = post.get("file_url") or post.get("large_file_url")
-            if not gif_url:
+            if not gif_url or filename_has_block_keyword(gif_url):
+                return None, None, None
+            if contains_illegal_indicators(json.dumps(post)):
                 return None, None, None
             extract_and_add_tags_from_meta(str(post.get("tag_string", "")), GIF_TAGS, data)
             return gif_url, f"danbooru_{positive}", post
@@ -337,7 +320,8 @@ async def fetch_from_danbooru(session, positive):
 
 async def fetch_from_gelbooru(session, positive):
     try:
-        tags = f"{positive} rating:explicit 1girl".strip()
+        blocked_str = " ".join([f"-{b}" for b in BLOCKED_TAGS])
+        tags = f"{positive} rating:explicit {blocked_str} 1girl".strip()
         base = "https://gelbooru.com/index.php"
         params = {
             "page": "dapi",
@@ -359,7 +343,9 @@ async def fetch_from_gelbooru(session, positive):
                 return None, None, None
             post = random.choice(posts)
             gif_url = post.get("file_url")
-            if not gif_url:
+            if not gif_url or filename_has_block_keyword(gif_url):
+                return None, None, None
+            if contains_illegal_indicators(json.dumps(post)):
                 return None, None, None
             extract_and_add_tags_from_meta(post.get("tags", ""), GIF_TAGS, data)
             return gif_url, f"gelbooru_{positive}", post
@@ -368,7 +354,8 @@ async def fetch_from_gelbooru(session, positive):
 
 async def fetch_from_rule34(session, positive):
     try:
-        tags = f"{positive} rating:explicit 1girl".strip()
+        blocked_str = " ".join([f"-{b}" for b in BLOCKED_TAGS])
+        tags = f"{positive} rating:explicit {blocked_str} 1girl".strip()
         base = "https://api.rule34.xxx/index.php"
         params = {
             "page": "dapi",
@@ -386,14 +373,16 @@ async def fetch_from_rule34(session, positive):
                 return None, None, None
             post = random.choice(posts)
             gif_url = post.get("file_url")
-            if not gif_url:
+            if not gif_url or filename_has_block_keyword(gif_url):
+                return None, None, None
+            if contains_illegal_indicators(json.dumps(post)):
                 return None, None, None
             extract_and_add_tags_from_meta(post.get("tags", ""), GIF_TAGS, data)
             return gif_url, f"rule34_{positive}", post
     except Exception:
         return None, None, None
 
-# ====== Provider List ======
+# ====== Providers list (NSFW) ======
 PROVIDERS = [
     ("hmtai", fetch_from_hmtai, 25),
     ("nekobot", fetch_from_nekobot, 25),
@@ -415,12 +404,14 @@ def _choose_random_provider():
         weights = [w for _, _, w in PROVIDERS]
         return random.choices(PROVIDERS, weights=weights, k=1)[0]
 
-# ====== Main Fetch Logic ======
+# ====== Main fetch/selection logic ======
 async def _fetch_one_gif(session, user_id=None, used_hashes=None):
     if used_hashes is None:
         used_hashes = set()
+
     tag = random.choice(GIF_TAGS)
     name, fetch_func, weight = _choose_random_provider()
+
     try:
         url, source, meta = await fetch_func(session, tag)
         if url:
@@ -430,12 +421,14 @@ async def _fetch_one_gif(session, user_id=None, used_hashes=None):
     except Exception as e:
         if DEBUG_FETCH:
             logger.debug(f"{name} fail: {e}")
+
     return None, None, None, None
 
 async def fetch_random_gif(session, user_id=None):
     user_id_str = str(user_id) if user_id else "global"
     user_history = data["sent_history"].setdefault(user_id_str, [])
     used_hashes = set(user_history)
+
     for attempt in range(FETCH_ATTEMPTS):
         url, source, meta, url_hash = await _fetch_one_gif(session, user_id, used_hashes)
         if url:
@@ -445,10 +438,11 @@ async def fetch_random_gif(session, user_id=None):
             data["sent_history"][user_id_str] = user_history
             logger.info(f"Attempt {attempt+1}: Fetched from {source}")
             return url, source, meta
+
     logger.warning(f"Failed to fetch after {FETCH_ATTEMPTS} attempts")
     return None, None, None
 
-# ====== Image Compression ======
+# ====== Utility: compress images if too large ======
 async def compress_image(image_bytes, target_size=DISCORD_MAX_UPLOAD):
     if not Image:
         return image_bytes
@@ -470,7 +464,7 @@ async def compress_image(image_bytes, target_size=DISCORD_MAX_UPLOAD):
         logger.error(f"Compression failed: {e}")
         return image_bytes
 
-# ====== Greeting Messages ======
+# ====== Embeds + send greeting helper ======
 JOIN_GREETINGS = [
     "💋 {display_name} slips in like a slow caress — the room just warmed up.",
     "🔥 {display_name} arrived, tracing heat across the air; someone hold the temperature.",
@@ -716,11 +710,9 @@ LEAVE_GREETINGS = [
     "⚡ {display_name} exited — sparks died but marks remained.",
     "🕯️ {display_name} disappeared into the dark; the night waits."
 ]
-
 while len(LEAVE_GREETINGS) < 120:
     LEAVE_GREETINGS.append(random.choice(LEAVE_GREETINGS))
-
-# ====== Send Greeting with Embed ======
+    
 async def send_greeting_with_image_embed(channel, session, greeting_text, image_url, member, send_to_dm=None):
     try:
         image_bytes, content_type = await _download_bytes_with_limit(session, image_url)
@@ -773,7 +765,7 @@ async def send_greeting_with_image_embed(channel, session, greeting_text, image_
         except Exception:
             pass
 
-# ====== Voice Channel Logic ======
+# ====== Voice-channel logic & helper functions ======
 def get_all_vcs_with_users(guild):
     out = []
     for vc_id in VC_IDS:
@@ -817,6 +809,12 @@ async def update_bot_vc_position(guild, target_channel=None):
     vcs_with_users = get_all_vcs_with_users(guild)
 
     if not vcs_with_users:
+        if voice_client and voice_client.is_connected():
+            try:
+                await voice_client.disconnect()
+                logger.info("Bot disconnected - all monitored VCs are empty")
+            except Exception as e:
+                logger.error(f"Failed to disconnect: {e}")
         return None
 
     target_vc = vcs_with_users[0][0]
@@ -840,7 +838,7 @@ async def update_bot_vc_position(guild, target_channel=None):
             logger.error(f"Failed to join VC: {e}")
             return None
 
-# ====== Bot Setup ======
+# ====== Bot setup and events ======
 intents = discord.Intents.default()
 intents.voice_states = True
 intents.message_content = True
@@ -850,35 +848,23 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready():
     logger.info(f"Logged in as {bot.user}")
-    if not autosave_task.is_running():
-        autosave_task.start()
-    if not check_vc.is_running():
-        check_vc.start()
-    if not check_vc_connection.is_running():
-        check_vc_connection.start()
-    try:
-        await join_voice_channel()
-    except Exception as e:
-        logger.warning(f"join_voice_channel failed on ready: {e}")
+    autosave_task.start()
+    check_vc.start()
+    await join_voice_channel()
 
 async def join_voice_channel():
     await bot.wait_until_ready()
     for vc_id in VC_IDS:
-        try:
-            vc = bot.get_channel(vc_id)
-            if not vc:
-                continue
-            if vc and isinstance(vc, discord.VoiceChannel):
-                try:
-                    if vc.guild.voice_client is None:
-                        await vc.connect()
-                        logger.info(f"Bot joined voice channel: {vc.name}")
-                    else:
-                        logger.info(f"Bot already in voice channel in guild: {vc.guild.name}")
-                except Exception as e:
-                    logger.error(f"Failed to join VC {vc_id}: {e}")
-        except Exception:
-            continue
+        vc = bot.get_channel(vc_id)
+        if vc and isinstance(vc, discord.VoiceChannel):
+            try:
+                if vc.guild.voice_client is None:
+                    await vc.connect()
+                    logger.info(f"Bot joined voice channel: {vc.name}")
+                else:
+                    logger.info(f"Bot already in voice channel: {vc.name}")
+            except Exception as e:
+                logger.error(f"Failed to join VC: {e}")
 
 @tasks.loop(seconds=300)
 async def check_vc_connection():
@@ -896,21 +882,6 @@ async def check_vc_connection():
 async def on_voice_state_update(member, before, after):
     if member.id == bot.user.id:
         return
-
-    # User joins a monitored VC: instant switch to that VC
-    if after.channel is not None and after.channel.id in VC_IDS:
-        if before.channel is None or before.channel.id != after.channel.id:
-            try:
-                vc_client = after.channel.guild.voice_client
-                if vc_client and vc_client.is_connected():
-                    if vc_client.channel.id != after.channel.id:
-                        await vc_client.move_to(after.channel)
-                        logger.info(f"Bot moved to VC: {after.channel.name} to follow user")
-                else:
-                    await after.channel.connect()
-                    logger.info(f"Bot joined VC: {after.channel.name} to follow user")
-            except Exception as e:
-                logger.error(f"Failed to follow user to VC: {e}")
 
     if before.channel is None and after.channel is not None:
         if after.channel.id in VC_IDS:
@@ -997,11 +968,8 @@ async def nsfw(ctx):
                 pass
         await ctx.send("Failed to fetch NSFW content. Try again.")
 
-# ====== Run Bot ======
+# ====== Run ======
 if not TOKEN:
     logger.error("No TOKEN env var set. Exiting.")
 else:
-    keep_alive()
     bot.run(TOKEN)
-
-
