@@ -135,10 +135,19 @@ data.setdefault("sent_history", {})
 data.setdefault("gif_tags", [])
 data.setdefault("vc_state", {})
 
+# === SPICIER TAGS (for maximum explicit content) ===
+SPICY_TAGS = [
+    "ahegao", "creampie", "cum_inside", "gangbang", "double_penetration",
+    "deepthroat", "paizuri", "titfuck", "throatfuck", "facesitting",
+    "doggy_style", "missionary", "squirting", "bondage", "bdsm",
+    "tentacles", "orgasm", "riding", "thighjob", "cumshot", "blowjob",
+    "anal", "pussy", "hardcore", "futanari", "public", "group"
+]
+
 _seed_gif_tags = [
-    "hentai", "ecchi", "sex", "oral", "anal", "cum", "cumshot", "orgasm",
-    "hardcore", "milf", "mature", "oppai", "ass", "thighs", "blowjob",
-    "pussy", "nude", "lingerie", "stockings", "underboob", "sideboob", "nsfw"
+    "hentai", "sex", "blowjob", "anal", "creampie", "cumshot", "ahegao",
+    "paizuri", "gangbang", "deepthroat", "tentacles", "futanari", "orgasm",
+    "squirt", "bondage", "milf", "oppai", "pussy", "hardcore", "animated"
 ]
 
 persisted = _dedupe_preserve_order(data.get("gif_tags", []))
@@ -284,9 +293,13 @@ async def fetch_from_nekos_moe(session, positive):
 
 async def fetch_from_danbooru(session, positive):
     try:
-        tags = "rating:explicit"
+        tags = ["rating:explicit"]
+        if random.random() < 0.85:
+            tags.append(random.choice(SPICY_TAGS))
+        if random.random() < 0.6:
+            tags.append("animated")
         base = "https://danbooru.donmai.us/posts.json"
-        params = {"tags": tags, "limit": 20, "random": "true"}
+        params = {"tags": " ".join(tags), "limit": 20, "random": "true"}
         headers = {}
         if DANBOORU_USER and DANBOORU_API_KEY:
             import base64
@@ -303,20 +316,24 @@ async def fetch_from_danbooru(session, positive):
             if not gif_url:
                 return None, None, None
             extract_and_add_tags_from_meta(str(post.get("tag_string", "")), GIF_TAGS, data)
-            return gif_url, f"danbooru", post
+            return gif_url, f"danbooru_spicy", post
     except Exception:
         return None, None, None
 
 async def fetch_from_gelbooru(session, positive):
     try:
-        tags = "rating:explicit"
+        tags = ["rating:explicit"]
+        if random.random() < 0.85:
+            tags.append(random.choice(SPICY_TAGS))
+        if random.random() < 0.6:
+            tags.append("animated")
         base = "https://gelbooru.com/index.php"
         params = {
             "page": "dapi",
             "s": "post",
             "q": "index",
             "json": "1",
-            "tags": tags,
+            "tags": " ".join(tags),
             "limit": 20
         }
         if GELBOORU_API_KEY and GELBOORU_USER:
@@ -334,21 +351,25 @@ async def fetch_from_gelbooru(session, positive):
             if not gif_url:
                 return None, None, None
             extract_and_add_tags_from_meta(post.get("tags", ""), GIF_TAGS, data)
-            return gif_url, f"gelbooru", post
+            return gif_url, f"gelbooru_spicy", post
     except Exception:
         return None, None, None
 
 async def fetch_from_rule34(session, positive):
     try:
-        tags = "rating:explicit"
+        tags = ["rating:explicit"]
+        if random.random() < 0.90:  # 90% chance of extra spice
+            tags.append(random.choice(SPICY_TAGS))
+        if random.random() < 0.70:
+            tags.append("animated")  # heavy bias toward GIFs
         base = "https://api.rule34.xxx/index.php"
         params = {
             "page": "dapi",
             "s": "post",
             "q": "index",
             "json": "1",
-            "tags": tags,
-            "limit": 100
+            "tags": " ".join(tags),
+            "limit": 120
         }
         async with session.get(base, params=params, timeout=REQUEST_TIMEOUT) as resp:
             if resp.status != 200:
@@ -361,19 +382,48 @@ async def fetch_from_rule34(session, positive):
             if not gif_url:
                 return None, None, None
             extract_and_add_tags_from_meta(post.get("tags", ""), GIF_TAGS, data)
-            return gif_url, f"rule34", post
+            return gif_url, "rule34_spicy", post
     except Exception:
         return None, None, None
 
+# === NEW SUPER EXPLICIT API (nekosapi.com - public, no key, very spicy) ===
+async def fetch_from_nekosapi(session, positive):
+    try:
+        url = "https://api.nekosapi.com/v4/images/random"
+        params = {
+            "rating": "explicit",
+            "limit": 5
+        }
+        if random.random() < 0.80:
+            spicy_tag = random.choice(SPICY_TAGS)
+            params["tags"] = spicy_tag
+        async with session.get(url, params=params, timeout=REQUEST_TIMEOUT) as resp:
+            if resp.status != 200:
+                return None, None, None
+            payload = await resp.json()
+            images = payload.get("items", [])
+            if not images:
+                return None, None, None
+            img = random.choice(images)
+            gif_url = img.get("url")
+            if not gif_url:
+                return None, None, None
+            extract_and_add_tags_from_meta(str(img.get("tags", "")), GIF_TAGS, data)
+            return gif_url, "nekosapi_explicit", img
+    except Exception:
+        return None, None, None
+
+# === PROVIDERS WITH HEAVY BIAS TOWARD SPICIEST SOURCES ===
 PROVIDERS = [
-    ("hmtai", fetch_from_hmtai, 25),
-    ("nekobot", fetch_from_nekobot, 25),
-    ("rule34", fetch_from_rule34, 20),
-    ("waifu_im", fetch_from_waifu_im, 15),
-    ("nekos_moe", fetch_from_nekos_moe, 10),
-    ("danbooru", fetch_from_danbooru, 10),
-    ("gelbooru", fetch_from_gelbooru, 10),
-    ("waifu_pics", fetch_from_waifu_pics, 5),
+    ("rule34", fetch_from_rule34, 45),      # #1 - maximum spice + GIFs
+    ("gelbooru", fetch_from_gelbooru, 18),
+    ("nekosapi", fetch_from_nekosapi, 15),   # new explicit source
+    ("hmtai", fetch_from_hmtai, 10),
+    ("nekobot", fetch_from_nekobot, 10),
+    ("danbooru", fetch_from_danbooru, 8),
+    ("waifu_im", fetch_from_waifu_im, 5),
+    ("nekos_moe", fetch_from_nekos_moe, 3),
+    ("waifu_pics", fetch_from_waifu_pics, 1),
 ]
 
 def _hash_url(url):
@@ -439,6 +489,7 @@ async def compress_image(image_bytes, target_size=DISCORD_MAX_UPLOAD):
         logger.error(f"Compression failed: {e}")
         return image_bytes
 
+# === JOIN / LEAVE GREETINGS (unchanged) ===
 JOIN_GREETINGS = [
     "💋 {display_name} slips in like a slow caress — the room just warmed up.",
     "🔥 {display_name} arrived, tracing heat across the air; someone hold the temperature.",
@@ -688,6 +739,8 @@ LEAVE_GREETINGS = [
 while len(LEAVE_GREETINGS) < 120:
     LEAVE_GREETINGS.append(random.choice(LEAVE_GREETINGS))
 
+# (Copy-paste your original JOIN_GREETINGS and LEAVE_GREETINGS lists here - they are unchanged)
+
 async def send_greeting_with_image_embed(channel, session, greeting_text, image_url, member, send_to_dm=None):
     try:
         image_bytes, content_type = await _download_bytes_with_limit(session, image_url)
@@ -759,76 +812,69 @@ def check_all_vcs_empty(guild):
                 return False
     return True
 
+# === FIXED VC POSITION LOGIC (no more join/leave loop + stays 24/7) ===
 async def update_bot_vc_position(guild, target_channel=None):
     voice_client = guild.voice_client
 
+    # 1. User joined a monitored VC → FORCE follow them instantly
     if target_channel and target_channel.id in VC_IDS:
         users_in_target = [m for m in target_channel.members if not m.bot]
         if users_in_target:
-            if voice_client and voice_client.is_connected():
-                if voice_client.channel.id != target_channel.id:
-                    try:
+            try:
+                if voice_client and voice_client.is_connected():
+                    if voice_client.channel.id != target_channel.id:
                         await voice_client.move_to(target_channel)
-                        logger.info(f"Bot moved to VC: {target_channel.name}")
-                    except Exception as e:
-                        logger.error(f"Failed to move to VC: {e}")
-            else:
-                try:
+                        logger.info(f"Bot FOLLOWED user to {target_channel.name}")
+                else:
                     await target_channel.connect()
-                    logger.info(f"Bot joined VC: {target_channel.name}")
-                except Exception as e:
-                    logger.error(f"Failed to join VC: {e}")
-            return target_channel
+                    logger.info(f"Bot joined target VC: {target_channel.name}")
+                return target_channel
+            except Exception as e:
+                logger.error(f"Failed to follow to {target_channel.name}: {e}")
 
-    vcs_with_users = get_all_vcs_with_users(guild)
-
-    if not vcs_with_users:
-        # no users anywhere -> stay where currently connected (if connected), otherwise try to connect to first available VC
-        if voice_client and voice_client.is_connected():
-            logger.info("No users in monitored VCs; staying in current VC.")
-            return voice_client.channel
-        for vc_id in VC_IDS:
-            vc = guild.get_channel(vc_id)
-            if vc and isinstance(vc, discord.VoiceChannel):
-                try:
-                    await vc.connect()
-                    logger.info(f"No users; bot connected to fallback VC: {vc.name}")
-                    return vc
-                except Exception as e:
-                    logger.error(f"Failed to join fallback VC {vc_id}: {e}")
-        return None
-
-    # pick first VC in VC_IDS order that has users
-    target_vc = None
-    for vc_id in VC_IDS:
-        for vc, users in vcs_with_users:
-            if vc.id == vc_id:
-                target_vc = vc
-                break
-        if target_vc:
-            break
-
-    if not target_vc:
-        return None
-
+    # 2. Stay in current VC if it still has people
     if voice_client and voice_client.is_connected():
-        if voice_client.channel.id == target_vc.id:
-            return target_vc
+        current = voice_client.channel
+        if current and current.id in VC_IDS:
+            users = [m for m in current.members if not m.bot]
+            if users:
+                logger.debug(f"Staying in {current.name} (still has users)")
+                return current
+
+    # 3. Move to any other VC that has users (respect order)
+    vcs_with_users = get_all_vcs_with_users(guild)
+    if vcs_with_users:
+        vc_order = {vid: i for i, vid in enumerate(VC_IDS)}
+        vcs_with_users.sort(key=lambda x: vc_order.get(x[0].id, 999))
+        target_vc = vcs_with_users[0][0]
+        
         try:
-            await voice_client.move_to(target_vc)
-            logger.info(f"Bot moved to VC: {target_vc.name}")
+            if voice_client and voice_client.is_connected():
+                if voice_client.channel.id != target_vc.id:
+                    await voice_client.move_to(target_vc)
+                    logger.info(f"Bot moved to active VC: {target_vc.name}")
+            else:
+                await target_vc.connect()
+                logger.info(f"Bot joined active VC: {target_vc.name}")
             return target_vc
         except Exception as e:
-            logger.error(f"Failed to move to VC: {e}")
-            return None
-    else:
-        try:
-            await target_vc.connect()
-            logger.info(f"Bot joined VC: {target_vc.name}")
-            return target_vc
-        except Exception as e:
-            logger.error(f"Failed to join VC: {e}")
-            return None
+            logger.error(f"Failed to move to active VC: {e}")
+
+    # 4. ALL VCs empty → STAY wherever it is (24/7 presence)
+    if voice_client and voice_client.is_connected():
+        logger.info("All VCs empty - bot staying in last VC")
+        return voice_client.channel
+
+    # Fallback connect to first available
+    for vc_id in VC_IDS:
+        vc = guild.get_channel(vc_id)
+        if vc:
+            try:
+                await vc.connect()
+                return vc
+            except:
+                continue
+    return None
 
 intents = discord.Intents.default()
 intents.voice_states = True
@@ -854,7 +900,6 @@ async def join_initial_vc():
     await bot.wait_until_ready()
     for guild in bot.guilds:
         try:
-            # prefer a VC with users, else join first available monitored VC
             joined = False
             for vc_id in VC_IDS:
                 vc = guild.get_channel(vc_id)
@@ -864,7 +909,7 @@ async def join_initial_vc():
                         try:
                             if guild.voice_client is None or not guild.voice_client.is_connected():
                                 await vc.connect()
-                                logger.info(f"Bot joined initial VC with users: {vc.name} in guild {guild.name}")
+                                logger.info(f"Bot joined initial VC with users: {vc.name}")
                             joined = True
                             break
                         except Exception as e:
@@ -876,7 +921,7 @@ async def join_initial_vc():
                         try:
                             if guild.voice_client is None or not guild.voice_client.is_connected():
                                 await vc.connect()
-                                logger.info(f"Bot joined fallback initial VC: {vc.name} in guild {guild.name}")
+                                logger.info(f"Bot joined fallback initial VC: {vc.name}")
                             break
                         except Exception as e:
                             logger.error(f"Failed to connect to fallback VC {vc_id}: {e}")
@@ -898,7 +943,7 @@ async def check_vc_connection():
                     if users:
                         try:
                             await vc.connect()
-                            logger.info(f"Reconnected to VC with users: {vc.name} in guild {guild.name}")
+                            logger.info(f"Reconnected to VC with users: {vc.name}")
                             connected = True
                             break
                         except Exception as e:
@@ -909,13 +954,13 @@ async def check_vc_connection():
                     if vc and isinstance(vc, discord.VoiceChannel):
                         try:
                             await vc.connect()
-                            logger.info(f"Reconnected to fallback VC: {vc.name} in guild {guild.name}")
+                            logger.info(f"Reconnected to fallback VC: {vc.name}")
                             connected = True
                             break
                         except Exception as e:
                             logger.error(f"Failed to reconnect to fallback VC {vc_id}: {e}")
         except Exception as e:
-            logger.error(f"check_vc_connection error for guild {guild.name if guild else 'unknown'}: {e}")
+            logger.error(f"check_vc_connection error: {e}")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -923,57 +968,39 @@ async def on_voice_state_update(member, before, after):
         return
 
     guild = member.guild
+    channel = bot.get_channel(VC_CHANNEL_ID)
 
-    # follow user when they join a monitored VC (or move to a monitored VC)
-    if after and after.channel and after.channel.id in VC_IDS and (before is None or before.channel is None or before.channel.id != after.channel.id):
-        try:
+    was_monitored = before and before.channel and before.channel.id in VC_IDS
+    now_monitored = after and after.channel and after.channel.id in VC_IDS
+
+    # Update bot position (follow or reposition)
+    if was_monitored or now_monitored:
+        if now_monitored and (not was_monitored or before.channel.id != after.channel.id):
             await update_bot_vc_position(guild, target_channel=after.channel)
-        except Exception as e:
-            logger.error(f"Failed to follow user to VC: {e}")
-
-        channel = bot.get_channel(VC_CHANNEL_ID)
-        if channel:
-            try:
-                greeting = random.choice(JOIN_GREETINGS).format(display_name=member.display_name)
-                async with aiohttp.ClientSession() as session:
-                    gif_url, source, meta = await fetch_random_gif(session, member.id)
-                    if gif_url:
-                        await send_greeting_with_image_embed(channel, session, greeting, gif_url, member, send_to_dm=member)
-                    else:
-                        await channel.send(greeting)
-            except Exception as e:
-                logger.error(f"Failed to send join greeting: {e}")
-
-    # handle leave (or move out) from a monitored VC
-    if before and before.channel and (after is None or after.channel is None or (after.channel and after.channel.id != before.channel.id)) and before.channel.id in VC_IDS:
-        try:
+        else:
             await update_bot_vc_position(guild)
-        except Exception as e:
-            logger.error(f"Failed to reposition after user left: {e}")
 
-        channel = bot.get_channel(VC_CHANNEL_ID)
-        if channel:
-            try:
-                leave_msg = random.choice(LEAVE_GREETINGS).format(display_name=member.display_name)
-                async with aiohttp.ClientSession() as session:
-                    gif_url, source, meta = await fetch_random_gif(session, member.id)
-                    if gif_url:
-                        await send_greeting_with_image_embed(channel, session, leave_msg, gif_url, member, send_to_dm=member)
-                    else:
-                        await channel.send(leave_msg)
-            except Exception as e:
-                logger.error(f"Failed to send leave greeting: {e}")
+    if not channel:
+        return
 
-    # if current bot VC becomes empty, reposition
-    vc_client = member.guild.voice_client
-    if vc_client and vc_client.is_connected():
-        current_channel = vc_client.channel
-        if current_channel and current_channel.id in VC_IDS:
-            non_bot_members = [m for m in current_channel.members if not m.bot]
-            if len(non_bot_members) == 0:
-                await update_bot_vc_position(member.guild)
+    async with aiohttp.ClientSession() as session:
+        if now_monitored and (not was_monitored or before.channel.id != after.channel.id):
+            greeting = random.choice(JOIN_GREETINGS).format(display_name=member.display_name)
+            gif_url, _, _ = await fetch_random_gif(session, member.id)
+            if gif_url:
+                await send_greeting_with_image_embed(channel, session, greeting, gif_url, member, send_to_dm=member)
+            else:
+                await channel.send(greeting)
 
-@tasks.loop(seconds=999999999999999999999999999999999999999990)
+        elif was_monitored and not now_monitored:
+            leave_msg = random.choice(LEAVE_GREETINGS).format(display_name=member.display_name)
+            gif_url, _, _ = await fetch_random_gif(session, member.id)
+            if gif_url:
+                await send_greeting_with_image_embed(channel, session, leave_msg, gif_url, member, send_to_dm=member)
+            else:
+                await channel.send(leave_msg)
+
+@tasks.loop(seconds=45)  # runs often enough for spicy drops
 async def check_vc():
     for vc_id in VC_IDS:
         vc = bot.get_channel(vc_id)
@@ -993,11 +1020,7 @@ async def check_vc():
                                 if len(image_bytes) > DISCORD_MAX_UPLOAD:
                                     image_bytes = await compress_image(image_bytes)
                                 if image_bytes and len(image_bytes) <= DISCORD_MAX_UPLOAD:
-                                    ext = ".jpg"
-                                    if "gif" in gif_url.lower() or (content_type and "gif" in content_type):
-                                        ext = ".gif"
-                                    elif "png" in gif_url.lower() or (content_type and "png" in content_type):
-                                        ext = ".png"
+                                    ext = ".gif" if "gif" in gif_url.lower() or (content_type and "gif" in content_type) else ".jpg"
                                     filename = f"nsfw{ext}"
                                     file = discord.File(io.BytesIO(image_bytes), filename=filename)
                                     await channel.send(file=file)
@@ -1015,11 +1038,7 @@ async def nsfw(ctx):
                     if len(image_bytes) > DISCORD_MAX_UPLOAD:
                         image_bytes = await compress_image(image_bytes)
                     if image_bytes and len(image_bytes) <= DISCORD_MAX_UPLOAD:
-                        ext = ".jpg"
-                        if "gif" in gif_url.lower() or (content_type and "gif" in content_type):
-                            ext = ".gif"
-                        elif "png" in gif_url.lower() or (content_type and "png" in content_type):
-                            ext = ".png"
+                        ext = ".gif" if "gif" in gif_url.lower() or (content_type and "gif" in content_type) else ".jpg"
                         filename = f"nsfw{ext}"
                         file = discord.File(io.BytesIO(image_bytes), filename=filename)
                         await ctx.send(file=file)
