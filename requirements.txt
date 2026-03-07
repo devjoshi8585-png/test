@@ -1,0 +1,7 @@
+# requirements.txt
+# NOTE: 'davey' was removed — it is not a real package and causes build failure.
+# discord.py[voice] includes PyNaCl automatically for VC support.
+discord.py[voice]>=2.3.2
+Flask>=3.1.0
+Pillow>=10.0.0
+aiohttp>=3.9.0
