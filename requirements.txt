@@ -2,4 +2,3 @@ discord.py[voice]
 Flask
 Pillow
 aiohttp
-davey
