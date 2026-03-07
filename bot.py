@@ -1,4 +1,3 @@
-# bot.py
 from flask import Flask
 from threading import Thread
 import os
@@ -24,26 +23,27 @@ import hashlib
 import logging
 import re
 import asyncio
-from datetime import datetime, timezone, timedelta
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import quote_plus
 
 import aiohttp
 import discord
 from discord.ext import commands, tasks
-from collections import deque
 
 try:
-    from PIL import Image, ImageSequence
+    from PIL import Image
 except Exception:
     Image = None
 
 TOKEN = os.getenv("TOKEN", "")
 WAIFUIM_API_KEY = os.getenv("WAIFUIM_API_KEY", "")
-WAIFUIT_API_KEY = os.getenv("WAIFUIT_API_KEY", "")
 DANBOORU_USER = os.getenv("DANBOORU_USER", "")
 DANBOORU_API_KEY = os.getenv("DANBOORU_API_KEY", "")
 GELBOORU_API_KEY = os.getenv("GELBOORU_API_KEY", "")
 GELBOORU_USER = os.getenv("GELBOORU_USER", "")
+
+# UPDATED_BY_AI: NEW SAFETY FLAGS (GOAL 3)
+NSFW_MODE = str(os.getenv("NSFW_MODE", "true")).strip().lower() in ("1", "true", "yes")
+AGE_VERIFICATION = str(os.getenv("AGE_VERIFICATION", "false")).strip().lower() in ("1", "true", "yes")
 
 _DEBUG_RAW = os.getenv("DEBUG_FETCH", "")
 DEBUG_FETCH = str(_DEBUG_RAW).strip().lower() in ("1", "true", "yes", "on")
@@ -69,15 +69,8 @@ logging.basicConfig(level=logging.DEBUG if DEBUG_FETCH else logging.INFO)
 logger = logging.getLogger("spiciest-nsfw")
 
 _token_split_re = re.compile(r"[^a-z0-9]+", re.I)
-BLOCKED_TAGS = []
 
 def _tag_is_disallowed(tag: str) -> bool:
-    return False
-
-def filename_has_block_keyword(url: str) -> bool:
-    return False
-
-def contains_illegal_indicators(text: str) -> bool:
     return False
 
 def _normalize_text(s: str) -> str:
@@ -135,7 +128,6 @@ data.setdefault("sent_history", {})
 data.setdefault("gif_tags", [])
 data.setdefault("vc_state", {})
 
-# === SPICIER TAGS (for maximum explicit content) ===
 SPICY_TAGS = [
     "ahegao", "creampie", "cum_inside", "gangbang", "double_penetration",
     "deepthroat", "paizuri", "titfuck", "throatfuck", "facesitting",
@@ -237,10 +229,75 @@ async def fetch_from_waifu_im(session, positive):
     except Exception:
         return None, None, None
 
-async def fetch_from_hmtai(session, positive):
+# UPDATED_BY_AI: Removed dead hmtai completely
+
+async def fetch_from_nekosapi(session, positive):
     try:
-        category = random.choice(["hentai","anal","ass","bdsm","cum","boobs","thighs","pussy","ahegao","tentacles"])
-        url = f"https://hmtai.hatsunia.cfd/v2/nsfw/{category}"
+        url = "https://api.nekosapi.com/v4/images/random"
+        params = {"rating": "explicit", "limit": 5}
+        if random.random() < 0.80:
+            params["tags"] = random.choice(SPICY_TAGS)
+        async with session.get(url, params=params, timeout=REQUEST_TIMEOUT) as resp:
+            if resp.status != 200:
+                return None, None, None
+            payload = await resp.json()
+            images = payload.get("items", [])
+            if not images:
+                return None, None, None
+            img = random.choice(images)
+            gif_url = img.get("url")
+            if not gif_url:
+                return None, None, None
+            extract_and_add_tags_from_meta(str(img.get("tags", "")), GIF_TAGS, data)
+            return gif_url, "nekosapi_explicit", img
+    except Exception:
+        return None, None, None
+
+# UPDATED_BY_AI: NEW PROVIDER #1 - e621 (public, no key)
+async def fetch_from_e621(session, positive):
+    try:
+        tags = "rating:explicit"
+        base = "https://e621.net/posts.json"
+        params = {"tags": tags, "limit": 20, "random": "true"}
+        async with session.get(base, params=params, timeout=REQUEST_TIMEOUT) as resp:
+            if resp.status != 200:
+                return None, None, None
+            posts = await resp.json()
+            if not posts or not isinstance(posts, list):
+                return None, None, None
+            post = random.choice(posts)
+            gif_url = post.get("file_url")
+            if not gif_url:
+                return None, None, None
+            extract_and_add_tags_from_meta(str(post.get("tag_string", "")), GIF_TAGS, data)
+            return gif_url, "e621", post
+    except Exception:
+        return None, None, None
+
+# UPDATED_BY_AI: NEW PROVIDER #2 - yande.re (public, no key)
+async def fetch_from_yandere(session, positive):
+    try:
+        tags = "rating:explicit"
+        url = f"https://yande.re/post.json?tags={quote_plus(tags)}&limit=20"
+        async with session.get(url, timeout=REQUEST_TIMEOUT) as resp:
+            if resp.status != 200:
+                return None, None, None
+            posts = await resp.json()
+            if not posts:
+                return None, None, None
+            post = random.choice(posts)
+            gif_url = post.get("file_url")
+            if not gif_url:
+                return None, None, None
+            extract_and_add_tags_from_meta(post.get("tags", ""), GIF_TAGS, data)
+            return gif_url, "yandere", post
+    except Exception:
+        return None, None, None
+
+# UPDATED_BY_AI: NEW PROVIDER #3 - nekos.life (public, no key)
+async def fetch_from_nekoslife(session, positive):
+    try:
+        url = "https://nekos.life/api/v2/img/hentai"
         async with session.get(url, timeout=REQUEST_TIMEOUT) as resp:
             if resp.status != 200:
                 return None, None, None
@@ -248,8 +305,8 @@ async def fetch_from_hmtai(session, positive):
             gif_url = payload.get("url")
             if not gif_url:
                 return None, None, None
-            extract_and_add_tags_from_meta(json.dumps(payload), GIF_TAGS, data)
-            return gif_url, f"hmtai_{category}", payload
+            extract_and_add_tags_from_meta("hentai", GIF_TAGS, data)
+            return gif_url, "nekoslife", payload
     except Exception:
         return None, None, None
 
@@ -358,10 +415,10 @@ async def fetch_from_gelbooru(session, positive):
 async def fetch_from_rule34(session, positive):
     try:
         tags = ["rating:explicit"]
-        if random.random() < 0.90:  # 90% chance of extra spice
+        if random.random() < 0.90:
             tags.append(random.choice(SPICY_TAGS))
         if random.random() < 0.70:
-            tags.append("animated")  # heavy bias toward GIFs
+            tags.append("animated")
         base = "https://api.rule34.xxx/index.php"
         params = {
             "page": "dapi",
@@ -386,44 +443,19 @@ async def fetch_from_rule34(session, positive):
     except Exception:
         return None, None, None
 
-# === NEW SUPER EXPLICIT API (nekosapi.com - public, no key, very spicy) ===
-async def fetch_from_nekosapi(session, positive):
-    try:
-        url = "https://api.nekosapi.com/v4/images/random"
-        params = {
-            "rating": "explicit",
-            "limit": 5
-        }
-        if random.random() < 0.80:
-            spicy_tag = random.choice(SPICY_TAGS)
-            params["tags"] = spicy_tag
-        async with session.get(url, params=params, timeout=REQUEST_TIMEOUT) as resp:
-            if resp.status != 200:
-                return None, None, None
-            payload = await resp.json()
-            images = payload.get("items", [])
-            if not images:
-                return None, None, None
-            img = random.choice(images)
-            gif_url = img.get("url")
-            if not gif_url:
-                return None, None, None
-            extract_and_add_tags_from_meta(str(img.get("tags", "")), GIF_TAGS, data)
-            return gif_url, "nekosapi_explicit", img
-    except Exception:
-        return None, None, None
-
-# === PROVIDERS WITH HEAVY BIAS TOWARD SPICIEST SOURCES ===
+# UPDATED_BY_AI: PROVIDERS list with MAX NSFW bias + 3 new public APIs (hmtai removed)
 PROVIDERS = [
-    ("rule34", fetch_from_rule34, 45),      # #1 - maximum spice + GIFs
+    ("rule34", fetch_from_rule34, 45),
     ("gelbooru", fetch_from_gelbooru, 18),
-    ("nekosapi", fetch_from_nekosapi, 15),   # new explicit source
-    ("hmtai", fetch_from_hmtai, 10),
-    ("nekobot", fetch_from_nekobot, 10),
+    ("nekosapi", fetch_from_nekosapi, 15),
+    ("nekoslife", fetch_from_nekoslife, 10),
+    ("e621", fetch_from_e621, 8),
+    ("yandere", fetch_from_yandere, 8),
+    ("nekobot", fetch_from_nekobot, 8),
     ("danbooru", fetch_from_danbooru, 8),
     ("waifu_im", fetch_from_waifu_im, 5),
     ("nekos_moe", fetch_from_nekos_moe, 3),
-    ("waifu_pics", fetch_from_waifu_pics, 1),
+    ("waifu_pics", fetch_from_waifu_pics, 2),
 ]
 
 def _hash_url(url):
@@ -453,6 +485,11 @@ async def _fetch_one_gif(session, user_id=None, used_hashes=None):
     return None, None, None, None
 
 async def fetch_random_gif(session, user_id=None):
+    # UPDATED_BY_AI: MAX NSFW SAFETY GATE
+    if not NSFW_MODE or not AGE_VERIFICATION:
+        logger.warning("NSFW_MODE or AGE_VERIFICATION disabled - skipping fetch")
+        return None, None, None
+
     user_id_str = str(user_id) if user_id else "global"
     user_history = data["sent_history"].setdefault(user_id_str, [])
     used_hashes = set(user_history)
@@ -489,7 +526,6 @@ async def compress_image(image_bytes, target_size=DISCORD_MAX_UPLOAD):
         logger.error(f"Compression failed: {e}")
         return image_bytes
 
-# === JOIN / LEAVE GREETINGS (unchanged) ===
 JOIN_GREETINGS = [
     "💋 {display_name} slips in like a slow caress — the room just warmed up.",
     "🔥 {display_name} arrived, tracing heat across the air; someone hold the temperature.",
@@ -735,11 +771,8 @@ LEAVE_GREETINGS = [
     "⚡ {display_name} exited — sparks died but marks remained.",
     "🕯️ {display_name} disappeared into the dark; the night waits."
 ]
-
 while len(LEAVE_GREETINGS) < 120:
     LEAVE_GREETINGS.append(random.choice(LEAVE_GREETINGS))
-
-# (Copy-paste your original JOIN_GREETINGS and LEAVE_GREETINGS lists here - they are unchanged)
 
 async def send_greeting_with_image_embed(channel, session, greeting_text, image_url, member, send_to_dm=None):
     try:
@@ -803,20 +836,9 @@ def get_all_vcs_with_users(guild):
                 out.append((vc, users))
     return out
 
-def check_all_vcs_empty(guild):
-    for vc_id in VC_IDS:
-        vc = guild.get_channel(vc_id)
-        if vc and isinstance(vc, discord.VoiceChannel):
-            users = [m for m in vc.members if not m.bot]
-            if len(users) > 0:
-                return False
-    return True
-
-# === FIXED VC POSITION LOGIC (no more join/leave loop + stays 24/7) ===
 async def update_bot_vc_position(guild, target_channel=None):
     voice_client = guild.voice_client
 
-    # 1. User joined a monitored VC → FORCE follow them instantly
     if target_channel and target_channel.id in VC_IDS:
         users_in_target = [m for m in target_channel.members if not m.bot]
         if users_in_target:
@@ -832,7 +854,6 @@ async def update_bot_vc_position(guild, target_channel=None):
             except Exception as e:
                 logger.error(f"Failed to follow to {target_channel.name}: {e}")
 
-    # 2. Stay in current VC if it still has people
     if voice_client and voice_client.is_connected():
         current = voice_client.channel
         if current and current.id in VC_IDS:
@@ -841,7 +862,6 @@ async def update_bot_vc_position(guild, target_channel=None):
                 logger.debug(f"Staying in {current.name} (still has users)")
                 return current
 
-    # 3. Move to any other VC that has users (respect order)
     vcs_with_users = get_all_vcs_with_users(guild)
     if vcs_with_users:
         vc_order = {vid: i for i, vid in enumerate(VC_IDS)}
@@ -860,12 +880,10 @@ async def update_bot_vc_position(guild, target_channel=None):
         except Exception as e:
             logger.error(f"Failed to move to active VC: {e}")
 
-    # 4. ALL VCs empty → STAY wherever it is (24/7 presence)
     if voice_client and voice_client.is_connected():
         logger.info("All VCs empty - bot staying in last VC")
         return voice_client.channel
 
-    # Fallback connect to first available
     for vc_id in VC_IDS:
         vc = guild.get_channel(vc_id)
         if vc:
@@ -973,7 +991,6 @@ async def on_voice_state_update(member, before, after):
     was_monitored = before and before.channel and before.channel.id in VC_IDS
     now_monitored = after and after.channel and after.channel.id in VC_IDS
 
-    # Update bot position (follow or reposition)
     if was_monitored or now_monitored:
         if now_monitored and (not was_monitored or before.channel.id != after.channel.id):
             await update_bot_vc_position(guild, target_channel=after.channel)
@@ -1000,7 +1017,7 @@ async def on_voice_state_update(member, before, after):
             else:
                 await channel.send(leave_msg)
 
-@tasks.loop(seconds=45)  # runs often enough for spicy drops
+@tasks.loop(seconds=45)
 async def check_vc():
     for vc_id in VC_IDS:
         vc = bot.get_channel(vc_id)
@@ -1046,6 +1063,10 @@ async def nsfw(ctx):
             except Exception:
                 pass
         await ctx.send("Failed to fetch NSFW content. Try again.")
+
+# UPDATED_BY_AI: Final safety check
+if not AGE_VERIFICATION:
+    logger.error("AGE_VERIFICATION env var missing/false – NSFW disabled for legal compliance (stub). Bot will still run but skip image fetches.")
 
 if not TOKEN:
     logger.error("No TOKEN env var set. Exiting.")
